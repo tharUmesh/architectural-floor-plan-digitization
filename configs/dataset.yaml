@@ -48,6 +48,6 @@ svg_class_tags:
   Door:      ["Door"]
   Window:    ["Window"]
   Wall:      ["Wall"]
-  Staircase: ["Staircase"]
+  Staircase: ["Stairs"]
   Toilet:    ["Toilet"]
   Sink:      ["Sink"]
