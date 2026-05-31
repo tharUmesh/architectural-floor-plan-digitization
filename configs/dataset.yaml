@@ -11,7 +11,7 @@ cubicasa:
   # F1_scaled.png is preferred: already normalized, consistent resolution
   image_filename: "F1_scaled.png"
   annotation_filename: "model.svg"
-
+ 
 # ── Subset Selection ────────────────────────────────────────────────────────
 selection:
   total: 500                # Start here; change to 5000 for full dataset
@@ -48,6 +48,6 @@ svg_class_tags:
   Door:      ["Door"]
   Window:    ["Window"]
   Wall:      ["Wall"]
-  Staircase: ["Staircase", "Stairs"]
-  Toilet:    ["Toilet", "Bathroom"]
-  Sink:      ["Sink", "Bathtub"]
+  Staircase: ["Staircase"]
+  Toilet:    ["Toilet"]
+  Sink:      ["Sink"]
