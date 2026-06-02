@@ -177,6 +177,59 @@ def compose_matrices(
         b2 * e1 + d2 * f1 + f2,
     )
 
+def collect_recursive(
+    elem: ET.Element,
+    base_accumulated: tuple | None,
+) -> list[tuple[float, float]]:
+    """
+    Recursively collect ALL polygon coordinates from all descendants of elem,
+    accumulating transforms level-by-level as we descend the tree.
+
+    WHY this fixes the "large bounding box" problem from before:
+    The previous approach applied ONE accumulated_transform uniformly to
+    ALL descendant polygon points. This was wrong for polygons inside
+    sub-groups that carry their OWN intermediate transforms (e.g. direction
+    arrows inside a Stairs element have local coordinates in their own
+    sub-group space). Applying the parent Stairs transform to those local
+    coords produced wildly incorrect positions.
+
+    This function instead computes the correct full transform chain from
+    SVG root to EACH INDIVIDUAL POLYGON, so every polygon gets precisely
+    the right transform applied — no more, no less.
+
+    Args:
+        elem:             The element whose descendants to collect from.
+        base_accumulated: Transform already accumulated from SVG root
+                          to elem (NOT including elem's own transform —
+                          that was already factored in by the caller).
+
+    Returns:
+        List of (x, y) tuples in SVG canvas coordinates.
+    """
+    all_coords: list[tuple[float, float]] = []
+
+    def descend(current: ET.Element, current_acc: tuple | None) -> None:
+        for child in current:
+            # Compute the accumulated transform for this specific child
+            child_t   = parse_matrix_transform(child.get("transform", ""))
+            child_acc = compose_matrices(current_acc, child_t)
+
+            tag = strip_ns(child.tag)
+
+            if tag == "polygon":
+                pts = parse_points(child.get("points", ""))
+                if pts:
+                    # Apply the FULL transform chain for this polygon
+                    if child_acc:
+                        pts = apply_matrix(pts, child_acc)
+                    all_coords.extend(pts)
+            else:
+                # Recurse into all non-polygon children (groups, paths, etc.)
+                descend(child, child_acc)
+
+    descend(elem, base_accumulated)
+    return all_coords
+
 def bbox_to_yolo(
     bbox: tuple[float, float, float, float],
     svg_w: float,
@@ -185,15 +238,16 @@ def bbox_to_yolo(
     """
     Convert a pixel bounding box to YOLO normalized format.
 
-    YOLO format: (x_center, y_center, width, height) all in [0.0, 1.0]
-    Normalization is by SVG viewBox dimensions (equivalent to normalizing
-    by PNG pixel dimensions since F1_scaled.png renders at SVG dimensions).
-
-    Returns None if the resulting box is invalid (zero area, out of bounds).
+    Size threshold change: reduced from 0.001 to 0.0001 (10x more permissive).
+    Reason: Small fixtures (toilets, sinks) in large professional drawings
+    (mean 1600×1400px) can legitimately produce boxes as small as 0.05% of
+    image width. The old 0.1% threshold was incorrectly rejecting these.
+    The new 0.01% threshold still filters out genuinely degenerate zero-area
+    boxes while keeping all real architectural elements.
     """
     x_min, y_min, x_max, y_max = bbox
 
-    # Clamp to SVG bounds (handles tiny floating-point overflows at edges)
+    # Clamp to SVG bounds
     x_min = max(0.0, min(x_min, svg_w))
     y_min = max(0.0, min(y_min, svg_h))
     x_max = max(0.0, min(x_max, svg_w))
@@ -202,9 +256,9 @@ def bbox_to_yolo(
     box_w = x_max - x_min
     box_h = y_max - y_min
 
-    # Reject zero-area and extremely tiny boxes
-    # (less than 0.1% of image dimension in either axis)
-    if box_w < svg_w * 0.001 or box_h < svg_h * 0.001:
+    # Reject only truly zero-area boxes (degenerate geometry)
+    # 0.0001 = 0.01% of image dimension — much more permissive than before
+    if box_w < svg_w * 0.0001 or box_h < svg_h * 0.0001:
         return None
 
     x_center = (x_min + x_max) / 2.0 / svg_w
@@ -246,72 +300,101 @@ def extract_stairs_bbox(
     accumulated_transform: tuple | None = None,
 ) -> tuple | None:
     """
-    Stairs: collect polygon points from ALL descendants and compute
-    the union bounding box.
+    Stairs: collect polygon coords from ALL descendants with proper
+    per-level transform accumulation.
 
-    Stairs elements have NO direct polygon child. All geometry lives
-    inside nested <g class="Steps"> children:
+    Why all descendants (not just Steps children):
+    The SVG structure has <g class="Steps"> as SIBLINGS of <g class="Stairs">,
+    not children of it. The Stairs boundary is encoded in polygons inside
+    the Stairs element's own subtree. We collect all of them to capture
+    the complete staircase area.
 
-        <g class="Stairs">
-            <g class="Steps">
-                <polygon points="..."/>   ← one step line
-                <polygon points="..."/>   ← another step line
-            </g>
-            <g class="Steps">
-                <polygon points="..."/>
-            </g>
-        </g>
-
-    The bounding box of ALL step polygons together = the staircase area.
+    Why NOT the old single-transform approach:
+    Applying one uniform accumulated_transform to ALL descendant polygon
+    points was wrong because sub-groups (direction arrows, etc.) carry
+    their own intermediate transforms. collect_recursive applies the
+    correct per-level chain to each polygon individually.
     """
-    all_coords = []
-
-    for descendant in elem.iter():
-        if strip_ns(descendant.tag) != "polygon":
-            continue
-        pts = parse_points(descendant.get("points", ""))
-        if pts:
-            if accumulated_transform:
-                pts = apply_matrix(pts, accumulated_transform)
-            all_coords.extend(pts)
-
+    all_coords = collect_recursive(elem, accumulated_transform)
     return coords_to_bbox(all_coords) if all_coords else None
 
+def find_boundary_polygon(
+    elem: ET.Element,
+    base_accumulated: tuple | None,
+) -> tuple | None:
+    """
+    Recursively search all descendants of elem for a group with
+    class="BoundaryPolygon", accumulating intermediate transforms.
+
+    Why recursive: Some SVG structures nest BoundaryPolygon inside
+    intermediate wrapper groups. A flat direct-child search misses these,
+    causing 24-27% of furniture elements to return no bounding box.
+
+    Returns (x_min, y_min, x_max, y_max) in canvas coordinates, or None.
+
+    Args:
+        elem:             The furniture element to search within.
+        base_accumulated: Transform accumulated from SVG root to elem.
+    """
+    def search(
+        current: ET.Element,
+        current_acc: tuple | None,
+    ) -> tuple | None:
+
+        for child in current:
+            if strip_ns(child.tag) != "g":
+                continue
+
+            # Accumulate this child's own transform
+            child_t   = parse_matrix_transform(child.get("transform", ""))
+            child_acc = compose_matrices(current_acc, child_t)
+
+            if "BoundaryPolygon" in child.get("class", "").split():
+                # Found the boundary polygon group — get first polygon inside
+                for polygon in child:
+                    if strip_ns(polygon.tag) == "polygon":
+                        pts = parse_points(polygon.get("points", ""))
+                        if pts:
+                            if child_acc:
+                                pts = apply_matrix(pts, child_acc)
+                            return coords_to_bbox(pts)
+                # BoundaryPolygon group exists but contains no polygon — keep searching
+
+            # Recurse into this child to look deeper
+            result = search(child, child_acc)
+            if result is not None:
+                return result
+
+        return None
+
+    return search(elem, base_accumulated)
 
 def extract_furniture_bbox(
     elem: ET.Element,
     accumulated_transform: tuple | None = None,
 ) -> tuple | None:
     """
-    Pattern B: Bounding box from BoundaryPolygon child, with accumulated
-    transform applied.
-    Used for: Toilet, Sink.
+    Toilet/Sink: BoundaryPolygon first, recursive all-descendants fallback.
 
-    The accumulated_transform is the composition of ALL ancestor transforms
-    down to this element. This correctly handles both:
-      - Transform directly on the furniture element (Toilet case)
-      - Transform on a parent wrapper group (Sink-in-FixedFurnitureSet case)
+    Two-stage strategy:
+    Stage 1 — find_boundary_polygon: recursively searches for a group with
+      class="BoundaryPolygon" and returns that group's polygon coordinates.
+      This is the cleanest extraction — one precise boundary polygon.
 
-    BoundaryPolygon points are in the element's local coordinate space.
-    Applying the accumulated transform converts them to canvas coordinates.
+    Stage 2 — collect_recursive fallback: if no BoundaryPolygon is found
+      (some furniture elements don't have this wrapper), collect all
+      descendant polygon coords with proper per-level transform chains.
+      This produces a slightly larger bbox (includes interior detail
+      polygons) but is always correct.
     """
-    for child in elem:
-        if strip_ns(child.tag) != "g":
-            continue
-        if "BoundaryPolygon" not in child.get("class", "").split():
-            continue
+    # Stage 1: precise BoundaryPolygon search
+    bbox = find_boundary_polygon(elem, accumulated_transform)
+    if bbox is not None:
+        return bbox
 
-        for grandchild in child:
-            if strip_ns(grandchild.tag) == "polygon":
-                coords = parse_points(grandchild.get("points", ""))
-                if coords:
-                    if accumulated_transform:
-                        coords = apply_matrix(coords, accumulated_transform)
-                    return coords_to_bbox(coords)
-
-    # Fallback: if no BoundaryPolygon found, try structural pattern
-    return extract_structural_bbox(elem, accumulated_transform)
-
+    # Stage 2: robust fallback — all descendants with recursive transforms
+    all_coords = collect_recursive(elem, accumulated_transform)
+    return coords_to_bbox(all_coords) if all_coords else None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SVG annotation extractor
