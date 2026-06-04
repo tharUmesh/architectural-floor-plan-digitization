@@ -43,7 +43,15 @@ Annotation counts across 4,967 folders:
 - Toilet:      6,949   (2.8%)
 - Staircase:   4,629   (1.9%) 
 
-Imbalance ratio Wall:Toilet ≈ 19:1
+Wall:      53.7%  ████████████████████████████████████████████  
+Door:      20.4%  ████████████████  
+Window:    18.0%  ██████████████  
+Sink:       3.2%  ██  
+Toilet:     2.8%  ██  
+Staircase:  1.9%  █  
+
+
+Imbalance ratio Wall:Staircase ≈ 28:1
 
 Phase 5 mitigation strategies to apply:
 1. YOLOv8's built-in class weighting via the `cls` loss weight
