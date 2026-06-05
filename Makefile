@@ -40,7 +40,7 @@ install-dev:
 	pip install -e .
 
 setup: install-dev
-	@cp -n .env.example .env || true
+	@if not exist .env (copy .env.example .env)
 	@echo "✓ Setup complete. Edit .env with your dataset paths."
 
 # ── Pipeline Stages ──────────────────────────────────────────────────────────

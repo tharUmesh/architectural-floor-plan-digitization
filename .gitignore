@@ -20,6 +20,7 @@ ENV/
 *.ipynb_checkpoints
 
 # ── Data — never commit raw dataset or processed files
+data/
 data/raw/*
 data/processed/*
 data/yolo_dataset/images/
