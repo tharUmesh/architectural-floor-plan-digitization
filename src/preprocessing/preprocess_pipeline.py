@@ -2,8 +2,9 @@
 Preprocessing Pipeline — Phase 2
 
 PURPOSE:
-    Transforms raw floor plan PNGs into model-ready tensors at 1024x1024.
-    Applies Otsu binarization, morphological closing, letterboxing, and
+    Transforms raw floor plan PNGs into model-ready images at 1024x1024.
+    Applies color-preserving CLAHE (on L channel in LAB space),
+    bilateral edge-preserving denoising, letterboxing, and
     bounding box coordinate adjustment.
 
 HOW TO RUN:
@@ -25,31 +26,39 @@ logger = get_logger(__name__)
 # --- Configuration Parameters ---
 TARGET_SIZE = 1024
 PAD_COLOR = (114, 114, 114)  # YOLO standard gray
-MORPH_KERNEL = np.ones((3, 3), np.uint8)
 
 
 def clean_floorplan_image(img: np.ndarray) -> np.ndarray:
     """
-    Cleans structural lines using binarization and morphology.
+    Color-preserving image cleaning with edge-aware denoising.
+
+    Step 2 improvement over grayscale CLAHE:
+      1. Preserves color — the "colorful" category uses different colors for
+         walls, doors, windows. Converting to grayscale destroys this signal.
+         YOLO was pretrained on color images (COCO), so its feature extractors
+         can leverage color information.
+      2. CLAHE on L channel only — enhances contrast without altering hue/saturation.
+         Applied in LAB color space so color tones remain unchanged.
+      3. Bilateral filter — denoises while preserving sharp edges. Gaussian blur
+         softens edges equally, which hurts detection of small elements (toilets,
+         sinks) whose boundaries are already thin lines.
     """
-    # 1. Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 1. Convert to LAB color space for luminance-only CLAHE
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
 
-    # 2. Otsu Binarization (Inverted so lines are white, paper is black)
-    # This is required because OpenCV morphology works on white objects.
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # 2. CLAHE on luminance channel only — enhances contrast, preserves color
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l_channel)
 
-    # 3. Morphological Closing (dilate then erode) to patch broken lines
-    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, MORPH_KERNEL, iterations=1)
+    # 3. Merge back and convert to BGR
+    lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
+    enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
 
-    # 4. Invert back (lines are black, paper is white)
-    cleaned_inv = cv2.bitwise_not(closed)
-
-    # 5. Light Gaussian Blur to soften jagged binary edges
-    blurred = cv2.GaussianBlur(cleaned_inv, (3, 3), 0)
-
-    # 6. Stack back to 3 channels to maintain pre-trained weights compatibility
-    final_img = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
+    # 4. Bilateral filter — edge-preserving denoising
+    #    d=5: small neighborhood, sigmaColor=50: moderate color smoothing,
+    #    sigmaSpace=50: moderate spatial smoothing
+    final_img = cv2.bilateralFilter(enhanced, d=5, sigmaColor=50, sigmaSpace=50)
 
     return final_img
 
