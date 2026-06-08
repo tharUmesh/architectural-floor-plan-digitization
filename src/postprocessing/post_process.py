@@ -118,7 +118,7 @@ def process_floorplan(
 if __name__ == "__main__":
     # Test the pipeline on a single image
     TEST_IMAGE = "data/yolo_dataset_processed/images/test/colorful_10711_F1.png"
-    MODEL_WEIGHTS = "runs/detect/models/yolo11l/weights/best.pt"
+    MODEL_WEIGHTS = "models/yolo11l_step2/weights/best.pt"
 
     if Path(TEST_IMAGE).exists():
         elements, scale = process_floorplan(TEST_IMAGE, MODEL_WEIGHTS)
