@@ -692,9 +692,11 @@ def process_split(
 
         # ── Extract annotations with actual image dimensions ──────────────
         yolo_lines, stats = extract_annotations(
+
             svg_path,
             class_id_map,
             svg_class_tags,
+
             override_width=float(actual_w),
             override_height=float(actual_h),
         )
