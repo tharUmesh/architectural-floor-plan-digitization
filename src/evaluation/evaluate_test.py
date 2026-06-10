@@ -3,10 +3,17 @@ from ultralytics import YOLO
 
 # ── Which model to evaluate ──────────────────────────────────────────────────
 # Change this path when evaluating different training runs
-MODEL_WEIGHTS = "runs/detect/models/yolo11m_final/weights/best.pt"
+MODEL_WEIGHTS = "runs/detect/models/11m_final/weights/best.pt"
 
 # Class names for per-class reporting
-CLASS_NAMES = {0: "Door", 1: "Window", 2: "Wall", 3: "Staircase", 4: "Toilet", 5: "Sink"}
+CLASS_NAMES = {
+    0: "Door",
+    1: "Window",
+    2: "Wall",
+    3: "Staircase",
+    4: "Toilet",
+    5: "Sink",
+}
 
 
 def main():
