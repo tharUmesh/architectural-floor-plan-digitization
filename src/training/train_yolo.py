@@ -50,17 +50,17 @@ def main():
     print(f"CUDA OK: {torch.cuda.get_device_name(0)} ({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
 
     # Load the YOLOv11 Medium pre-trained model
-    print("Loading YOLOv11m model...")
-    model = YOLO("yolo11m.pt")
+    print("Loading YOLOv26m model...")
+    model = YOLO("yolo26m.pt")
 
     # Start training with hardware-specific constraints
     print("Starting training loop...")
     results = model.train(
         data="data/yolo_dataset_processed/dataset.yaml",
-        epochs=100,
-        imgsz=1024,
+        epochs=150,
+        imgsz=1280,  # Higher resolution for better small object detection
         # --- HARDWARE EXPLOITATION (RTX 5090 32GB VRAM) ---
-        batch=32,  # 32GB VRAM can handle batch=32 at 1024px; reduce to 16 if OOM
+        batch=8,  # 32GB VRAM can handle batch=32 at 1024px; reduce to 16 if OOM
         device=0,  # Force use of the primary GPU
         workers=8,  # CPU workers to feed the GPU faster
         amp=True,  # Automatic Mixed Precision (speeds up RTX training)
@@ -75,10 +75,10 @@ def main():
         box=7.5,  # ↓ from 10.0 default — slight rebalance toward classification
         # --- AUGMENTATION STRATEGY ---
         mosaic=1.0,  # Combines 4 floor plans into one
-        close_mosaic=30,  # Turn off mosaic for last 30 epochs for fine-tuning
-        mixup=0.15,  # Blend two images — helps class boundary learning
-        copy_paste=0.15,  # NEW: Copy objects between images — boosts rare classes
-        degrees=90.0,  # Floor plans can be oriented in any direction
+        close_mosaic=15,  # Turn off mosaic for last 15 epochs for fine-tuning
+        #mixup=0.15,  # Blend two images — helps class boundary learning
+        copy_paste=0.3,  # NEW: Copy objects between images — boosts rare classes
+        #degrees=90.0,  # Floor plans can be oriented in any direction
         fliplr=0.5,  # Horizontal flips are structurally valid
         flipud=0.5,  # Vertical flips are structurally valid
         scale=0.3,  # ↓ from 0.5 — less extreme to avoid shrinking small fixtures
@@ -92,12 +92,12 @@ def main():
         patience=40,  # Stop if no improvement for 40 epochs
         # --- LOGGING & SAVING ---
         project="models",
-        name="yolo11m_step1",
+        name="yolo26m_final",
         save=True,
         save_period=10,  # Save a checkpoint every 10 epochs
     )
 
-    print("Training complete! Best weights are saved in models/yolo11m_step1/weights/")
+    print("Training complete! Best weights are saved in models/yolo26m_final/weights/")
 
 
 if __name__ == "__main__":
