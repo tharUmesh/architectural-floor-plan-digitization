@@ -90,3 +90,22 @@ sync-ubuntu:
 	rsync -avz --exclude='data/raw/' --exclude='data/processed/' \
 	      --exclude='runs/' --exclude='.venv/' \
 	      ./ $(UBUNTU_USER)@$(UBUNTU_HOST):$(UBUNTU_PATH)
+
+# ── Hyperparameter Tuning ─────────────────────────────────────────────────
+
+tune:
+	python src/training/hyperparameter_tuning.py
+
+tune-list:
+	python src/training/hyperparameter_tuning.py --list
+
+tune-resume:
+	python src/training/hyperparameter_tuning.py --resume
+
+tune-fast:
+	# Run only the most targeted experiments first (saves ~60% compute)
+	python src/training/hyperparameter_tuning.py --only E01 E06 E07
+
+tune-combined:
+	# Run only the combined experiments (assumes E01-E05 already done)
+	python src/training/hyperparameter_tuning.py --only E06 E07 E08
